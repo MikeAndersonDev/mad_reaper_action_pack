@@ -1,17 +1,35 @@
 --[[
     REAPER Lua Action
-    Insert Hi-Hat MIDI - Exactly One Bar
+    Insert Drum MIDI - Exactly One Bar
 
-    CROSS-PLATFORM VERSION
-    ----------------------
+    --------------------------------------------------------
+    FEATURES
+    --------------------------------------------------------
 
     Popup:
         320 x 190
 
-    The popup is centered on the monitor containing
-    the REAPER main window.
+    Dropdowns:
+        Instrument
+        Subdivision
+        Feel
 
-    Subdivision:
+    Instruments:
+        Hi-Hat
+        Kick
+        Snare
+        Low Tom
+        Mid Tom
+        High Tom
+        Floor Tom
+        Crash
+        Ride
+        Ride Bell
+        Rim
+        Clap
+        Cowbell
+
+    Subdivisions:
         Quarter
         Eighth
         Sixteenth
@@ -24,25 +42,49 @@
         Triplet
 
     Defaults:
-        Quarter
-        Normal
+        Instrument  = Hi-Hat
+        Subdivision = Quarter
+        Feel        = Normal
 
     Keyboard:
         Enter = Insert
         Esc   = Cancel
 
     MIDI:
-        Closed Hi-Hat = 42
-        Channel       = 10
-        Velocity      = 100
+        General MIDI percussion
+        Channel 10 / zero-based channel 9
 
-    Requires:
-        JS_ReaScriptAPI
+    TIME SIGNATURE
+    --------------------------------------------------------
 
-    Time signature:
-        Uses REAPER's exact measure QN boundaries.
-        Works with 2/4, 3/4, 4/4, 5/4,
-        6/8, 7/8, 9/8, 12/8, etc.
+    Uses REAPER's exact measure QN boundaries.
+
+    Therefore the MIDI item follows the actual project
+    measure regardless of time signature:
+
+        2/4
+        3/4
+        4/4
+        5/4
+        6/8
+        7/8
+        9/8
+        12/8
+        etc.
+
+    The script never calculates the bar length from the
+    time signature. REAPER supplies the exact measure
+    boundaries.
+
+    --------------------------------------------------------
+    REQUIRES
+    --------------------------------------------------------
+
+    JS_ReaScriptAPI
+
+    The script will still run if JS_ReaScriptAPI is missing,
+    but monitor-specific centering will fall back to
+    centering over the REAPER window.
 ]]
 
 ------------------------------------------------------------
@@ -51,10 +93,48 @@
 
 local PROJ = 0
 
-local TITLE = "Insert Hi-Hat MIDI"
+local TITLE = "Insert Drum MIDI"
 
 local WINDOW_W = 320
 local WINDOW_H = 190
+
+------------------------------------------------------------
+-- MIDI CHANNEL
+--
+-- REAPER uses zero-based MIDI channels.
+--
+-- 9 = MIDI channel 10.
+------------------------------------------------------------
+
+local MIDI_CHANNEL = 9
+
+------------------------------------------------------------
+-- INSTRUMENTS
+--
+-- General MIDI percussion note numbers.
+------------------------------------------------------------
+
+local instruments = {
+    { name = "Hi-Hat",    note = 42 },
+    { name = "Kick",      note = 36 },
+    { name = "Snare",     note = 38 },
+    { name = "Low Tom",   note = 45 },
+    { name = "Mid Tom",   note = 47 },
+    { name = "High Tom",  note = 50 },
+    { name = "Floor Tom", note = 41 },
+    { name = "Crash",     note = 49 },
+    { name = "Ride",      note = 51 },
+    { name = "Ride Bell", note = 53 },
+    { name = "Rim",       note = 37 },
+    { name = "Clap",      note = 39 },
+    { name = "Cowbell",   note = 56 }
+}
+
+local instrumentNames = {}
+
+for i = 1, #instruments do
+    instrumentNames[i] = instruments[i].name
+end
 
 ------------------------------------------------------------
 -- SUBDIVISIONS
@@ -67,6 +147,10 @@ local subdivisionNames = {
     "32nd",
     "64th"
 }
+
+------------------------------------------------------------
+-- Number of notes per quarter note.
+------------------------------------------------------------
 
 local subdivisionValues = {
     1,
@@ -90,16 +174,9 @@ local feelNames = {
 -- DEFAULTS
 ------------------------------------------------------------
 
-local subdivisionChoice = 1
-local feelChoice = 1
-
-------------------------------------------------------------
--- MIDI
-------------------------------------------------------------
-
-local MIDI_NOTE = 42
-local MIDI_CHANNEL = 9
-local MIDI_VELOCITY = 100
+local instrumentChoice = 1      -- Hi-Hat
+local subdivisionChoice = 1     -- Quarter
+local feelChoice = 1             -- Normal
 
 ------------------------------------------------------------
 -- SELECTED TRACK
@@ -150,26 +227,30 @@ local COLORS = {
 
 ------------------------------------------------------------
 -- GUI LAYOUT
+--
+-- Three dropdowns now fit into the original 320 x 190
+-- window.
 ------------------------------------------------------------
 
-local labelX = 20
-local fieldX = 125
+local labelX = 18
+local fieldX = 115
 
-local fieldW = 175
-local fieldH = 28
+local fieldW = 187
+local fieldH = 25
 
-local subdivisionY = 53
-local feelY = 91
+local instrumentY  = 39
+local subdivisionY = 69
+local feelY        = 99
 
 local insertX = 55
 local cancelX = 170
 
-local buttonY = 140
+local buttonY = 143
 local buttonW = 100
 local buttonH = 30
 
 ------------------------------------------------------------
--- DRAW HELPERS
+-- COLOR HELPER
 ------------------------------------------------------------
 
 local function setColor(c)
@@ -182,6 +263,8 @@ local function setColor(c)
     )
 end
 
+------------------------------------------------------------
+-- RECTANGLE HELPER
 ------------------------------------------------------------
 
 local function drawRect(
@@ -205,6 +288,8 @@ local function drawRect(
 end
 
 ------------------------------------------------------------
+-- MOUSE HIT TEST
+------------------------------------------------------------
 
 local function mouseIn(
     x,
@@ -224,7 +309,7 @@ local function mouseIn(
 end
 
 ------------------------------------------------------------
--- BUTTON
+-- DRAW BUTTON
 ------------------------------------------------------------
 
 local function drawButton(
@@ -294,7 +379,7 @@ local function drawButton(
 end
 
 ------------------------------------------------------------
--- DROPDOWN
+-- DRAW DROPDOWN
 ------------------------------------------------------------
 
 local function drawDropdown(
@@ -330,6 +415,10 @@ local function drawDropdown(
         false
     )
 
+    --------------------------------------------------------
+    -- Text
+    --------------------------------------------------------
+
     gfx.setfont(
         1,
         "Arial",
@@ -338,8 +427,11 @@ local function drawDropdown(
 
     setColor(COLORS.text)
 
-    gfx.x = x + 10
-    gfx.y = y + 7
+    gfx.x =
+        x + 9
+
+    gfx.y =
+        y + 5
 
     gfx.drawstr(text)
 
@@ -348,25 +440,29 @@ local function drawDropdown(
     --------------------------------------------------------
 
     local arrowX =
-        x + w - 20
+        x + w - 17
 
     local arrowY =
         y + h / 2
 
-    setColor(COLORS.label)
+    setColor(
+        COLORS.label
+    )
 
     gfx.triangle(
         arrowX - 5,
         arrowY - 3,
+
         arrowX + 5,
         arrowY - 3,
+
         arrowX,
         arrowY + 4
     )
 end
 
 ------------------------------------------------------------
--- DROPDOWN MENU
+-- SHOW DROPDOWN
 ------------------------------------------------------------
 
 local function showDropdown(
@@ -421,12 +517,16 @@ local function drawWindow()
         18
     )
 
-    setColor(COLORS.text)
+    setColor(
+        COLORS.text
+    )
 
-    gfx.x = 20
-    gfx.y = 15
+    gfx.x = 18
+    gfx.y = 10
 
-    gfx.drawstr(TITLE)
+    gfx.drawstr(
+        TITLE
+    )
 
     --------------------------------------------------------
     -- Labels
@@ -438,17 +538,48 @@ local function drawWindow()
         14
     )
 
-    setColor(COLORS.label)
+    setColor(
+        COLORS.label
+    )
 
     gfx.x = labelX
-    gfx.y = subdivisionY + 6
+    gfx.y = instrumentY + 5
 
-    gfx.drawstr("Subdivision")
+    gfx.drawstr(
+        "Instrument"
+    )
 
     gfx.x = labelX
-    gfx.y = feelY + 6
+    gfx.y = subdivisionY + 5
 
-    gfx.drawstr("Feel")
+    gfx.drawstr(
+        "Subdivision"
+    )
+
+    gfx.x = labelX
+    gfx.y = feelY + 5
+
+    gfx.drawstr(
+        "Feel"
+    )
+
+    --------------------------------------------------------
+    -- Instrument
+    --------------------------------------------------------
+
+    drawDropdown(
+        fieldX,
+        instrumentY,
+        fieldW,
+        fieldH,
+        instrumentNames[instrumentChoice],
+        mouseIn(
+            fieldX,
+            instrumentY,
+            fieldW,
+            fieldH
+        )
+    )
 
     --------------------------------------------------------
     -- Subdivision
@@ -526,50 +657,49 @@ local function drawWindow()
 end
 
 ------------------------------------------------------------
--- CROSS-PLATFORM CENTER POSITION
+-- CENTER POPUP
 --
--- Centers the popup on the monitor containing the CENTER
--- of the REAPER main window.
+-- IMPORTANT:
 --
--- Uses JS_Window_GetViewportFromRect(), which is designed
--- specifically to determine the monitor/work area.
+-- JS_Window_FromPoint() is NOT used here.
 --
--- wantWork = true:
---   Excludes taskbar / dock / desktop toolbars where the
---   operating system provides that information.
+-- It returns a window, not a monitor.
 --
--- This is preferable to JS_Window_FromPoint(), because
--- JS_Window_FromPoint() returns a WINDOW, not a MONITOR.
+-- JS_Window_GetViewportFromRect() is used to determine
+-- which monitor contains the center of the REAPER window.
+--
+-- wantWork = true means use the usable monitor work area
+-- rather than positioning underneath a taskbar/dock.
 ------------------------------------------------------------
 
 local function getCenteredPosition()
 
     --------------------------------------------------------
-    -- Start with a safe fallback.
+    -- Safe fallback.
     --------------------------------------------------------
 
-    local x = 0
-    local y = 0
+    local fallbackX = 100
+    local fallbackY = 100
 
     --------------------------------------------------------
-    -- JS_ReaScriptAPI required.
+    -- Need JS_ReaScriptAPI for monitor-aware positioning.
     --------------------------------------------------------
 
     if not reaper.JS_Window_GetRect
     or not reaper.JS_Window_GetViewportFromRect then
 
-        return x, y
+        return fallbackX, fallbackY
     end
 
     --------------------------------------------------------
-    -- Get REAPER main window.
+    -- REAPER main window.
     --------------------------------------------------------
 
     local mainHWND =
         reaper.GetMainHwnd()
 
     if not mainHWND then
-        return x, y
+        return fallbackX, fallbackY
     end
 
     --------------------------------------------------------
@@ -586,16 +716,11 @@ local function getCenteredPosition()
         )
 
     if not ok then
-        return x, y
+        return fallbackX, fallbackY
     end
 
     --------------------------------------------------------
-    -- Use the CENTER POINT of REAPER's main window.
-    --
-    -- We make this a 1x1 rectangle.
-    --
-    -- GetViewportFromRect() will therefore select the
-    -- monitor containing this point.
+    -- Center point of REAPER.
     --------------------------------------------------------
 
     local centerX =
@@ -609,15 +734,16 @@ local function getCenteredPosition()
         )
 
     --------------------------------------------------------
-    -- Ask JS_ReaScriptAPI for the monitor WORK AREA.
+    -- Find the monitor/work area containing that point.
     --
-    -- true = exclude taskbar / dock / desktop toolbar.
+    -- A 1x1 rectangle is used so the selected viewport is
+    -- the monitor containing the REAPER center.
     --------------------------------------------------------
 
-    local monitorLeft,
-          monitorTop,
-          monitorRight,
-          monitorBottom =
+    local viewportLeft,
+          viewportTop,
+          viewportRight,
+          viewportBottom =
         reaper.JS_Window_GetViewportFromRect(
             centerX,
             centerY,
@@ -627,226 +753,52 @@ local function getCenteredPosition()
         )
 
     --------------------------------------------------------
-    -- Validate returned monitor rectangle.
+    -- Validate.
     --------------------------------------------------------
 
-    if not monitorLeft
-    or not monitorTop
-    or not monitorRight
-    or not monitorBottom then
+    if not viewportLeft
+    or not viewportTop
+    or not viewportRight
+    or not viewportBottom then
 
         ----------------------------------------------------
-        -- Fallback: center on REAPER itself.
+        -- Fallback to REAPER window center.
         ----------------------------------------------------
 
-        x =
+        return
             math.floor(
                 (left + right - WINDOW_W) / 2
-            )
-
-        y =
+            ),
             math.floor(
                 (top + bottom - WINDOW_H) / 2
             )
-
-        return x, y
     end
 
     --------------------------------------------------------
-    -- Center the 320 x 190 popup inside the monitor's
-    -- usable work area.
+    -- Center the 320 x 190 popup.
     --
-    -- IMPORTANT:
-    --
-    -- These coordinates are the TOP-LEFT of the popup.
-    -- We subtract HALF the popup dimensions.
+    -- These are TOP-LEFT coordinates.
     --------------------------------------------------------
 
-    x =
+    local x =
         math.floor(
-            monitorLeft +
+            viewportLeft +
             (
-                (monitorRight - monitorLeft)
+                (viewportRight - viewportLeft)
                 - WINDOW_W
             ) / 2
         )
 
-    y =
+    local y =
         math.floor(
-            monitorTop +
+            viewportTop +
             (
-                (monitorBottom - monitorTop)
+                (viewportBottom - viewportTop)
                 - WINDOW_H
             ) / 2
         )
 
     return x, y
-end
-
-
-------------------------------------------------------------
--- OPEN WINDOW
-------------------------------------------------------------
-
-local popupX,
-      popupY =
-    getCenteredPosition()
-
-gfx.init(
-    TITLE,
-    WINDOW_W,
-    WINDOW_H,
-    0,
-    popupX,
-    popupY
-)
-
-------------------------------------------------------------
--- OPTIONAL NATIVE CORRECTION
---
--- gfx.init() normally positions the window correctly.
---
--- On systems with unusual DPI/window-manager behavior,
--- perform one correction after the native window exists.
-------------------------------------------------------------
-
-local function correctPopupPosition()
-
-    if not reaper.JS_Window_Find
-    or not reaper.JS_Window_GetRect
-    or not reaper.JS_Window_SetPosition then
-
-        return
-    end
-
-    local popupHWND =
-        reaper.JS_Window_Find(
-            TITLE,
-            true
-        )
-
-    if not popupHWND then
-        return
-    end
-
-    local mainHWND =
-        reaper.GetMainHwnd()
-
-    if not mainHWND then
-        return
-    end
-
-    --------------------------------------------------------
-    -- Get REAPER.
-    --------------------------------------------------------
-
-    local ok,
-          left,
-          top,
-          right,
-          bottom =
-        reaper.JS_Window_GetRect(
-            mainHWND
-        )
-
-    if not ok then
-        return
-    end
-
-    --------------------------------------------------------
-    -- Center based on the monitor containing REAPER's
-    -- center point.
-    --------------------------------------------------------
-
-    local cx =
-        math.floor(
-            (left + right) / 2
-        )
-
-    local cy =
-        math.floor(
-            (top + bottom) / 2
-        )
-
-    local monitorHWND = nil
-
-    if reaper.JS_Window_FromPoint then
-
-        monitorHWND =
-            reaper.JS_Window_FromPoint(
-                cx,
-                cy
-            )
-    end
-
-    if not monitorHWND then
-        return
-    end
-
-    local mok,
-          ml,
-          mt,
-          mr,
-          mb =
-        reaper.JS_Window_GetRect(
-            monitorHWND
-        )
-
-    if not mok then
-        return
-    end
-
-    --------------------------------------------------------
-    -- Popup's actual outer size.
-    --------------------------------------------------------
-
-    local pok,
-          pl,
-          pt,
-          pr,
-          pb =
-        reaper.JS_Window_GetRect(
-            popupHWND
-        )
-
-    if not pok then
-        return
-    end
-
-    local popupW =
-        pr - pl
-
-    local popupH =
-        pb - pt
-
-    if popupW <= 0
-    or popupH <= 0 then
-        return
-    end
-
-    --------------------------------------------------------
-    -- Center actual native window.
-    --------------------------------------------------------
-
-    local nx =
-        math.floor(
-            ml +
-            ((mr - ml) - popupW) / 2
-        )
-
-    local ny =
-        math.floor(
-            mt +
-            ((mb - mt) - popupH) / 2
-        )
-
-    reaper.JS_Window_SetPosition(
-        popupHWND,
-        nx,
-        ny,
-        popupW,
-        popupH
-    )
 end
 
 ------------------------------------------------------------
@@ -856,23 +808,31 @@ end
 local function insertNote(
     take,
     startQN,
-    endQN,
+    nextQN,
     barEndQN
 )
+
+    --------------------------------------------------------
+    -- Never place a note at or beyond the end of the bar.
+    --------------------------------------------------------
 
     if startQN >= barEndQN then
         return
     end
 
-    endQN =
+    nextQN =
         math.min(
-            endQN,
+            nextQN,
             barEndQN
         )
 
-    if endQN <= startQN then
+    if nextQN <= startQN then
         return
     end
+
+    --------------------------------------------------------
+    -- Convert project QN positions to MIDI PPQ.
+    --------------------------------------------------------
 
     local startPPQ =
         reaper.MIDI_GetPPQPosFromProjQN(
@@ -880,20 +840,33 @@ local function insertNote(
             startQN
         )
 
-    local endPPQ =
+    local nextPPQ =
         reaper.MIDI_GetPPQPosFromProjQN(
             take,
-            endQN
+            nextQN
         )
 
     local spacingPPQ =
-        endPPQ - startPPQ
+        nextPPQ - startPPQ
+
+    --------------------------------------------------------
+    -- Short drum note.
+    --
+    -- 25% of the spacing.
+    --
+    -- This gives enough separation for hi-hats, kicks,
+    -- snares and toms while remaining musically useful.
+    --------------------------------------------------------
 
     local noteLengthPPQ =
         math.max(
             1,
             spacingPPQ * 0.25
         )
+
+    --------------------------------------------------------
+    -- Exact end of bar in PPQ.
+    --------------------------------------------------------
 
     local barEndPPQ =
         reaper.MIDI_GetPPQPosFromProjQN(
@@ -907,20 +880,34 @@ local function insertNote(
             barEndPPQ
         )
 
-    if noteEndPPQ > startPPQ then
-
-        reaper.MIDI_InsertNote(
-            take,
-            false,
-            false,
-            startPPQ,
-            noteEndPPQ,
-            MIDI_CHANNEL,
-            MIDI_NOTE,
-            MIDI_VELOCITY,
-            true
-        )
+    if noteEndPPQ <= startPPQ then
+        return
     end
+
+    --------------------------------------------------------
+    -- Insert General MIDI percussion note.
+    --------------------------------------------------------
+
+    local midiNote =
+        instruments[instrumentChoice].note
+
+    reaper.MIDI_InsertNote(
+        take,
+
+        false,          -- selected
+        false,          -- muted
+
+        startPPQ,
+        noteEndPPQ,
+
+        MIDI_CHANNEL,
+
+        midiNote,
+
+        100,            -- velocity
+
+        true            -- noSort
+    )
 end
 
 ------------------------------------------------------------
@@ -969,6 +956,24 @@ local function insertSwingGrid(
     subdivisionQN
 )
 
+    --------------------------------------------------------
+    -- Swing pairs the selected subdivision.
+    --
+    -- Example:
+    --
+    -- Eighth-note subdivision:
+    --
+    -- straight:
+    --
+    -- | 0.0 | 0.5 | 1.0 | 1.5 |
+    --
+    -- swing:
+    --
+    -- | 0.0 | 0.6667 | 1.0 | 1.6667 |
+    --
+    -- This creates a 2:1 long/short relationship.
+    --------------------------------------------------------
+
     local pairQN =
         subdivisionQN * 2
 
@@ -991,16 +996,31 @@ local function insertSwingGrid(
             break
         end
 
+        ----------------------------------------------------
+        -- First note.
+        ----------------------------------------------------
+
+        local firstQN =
+            currentQN
+
+        ----------------------------------------------------
+        -- Second note at 2/3 of the pair.
+        ----------------------------------------------------
+
         local secondQN =
             currentQN +
             pairLength * (2 / 3)
 
         insertNote(
             take,
-            currentQN,
+            firstQN,
             secondQN,
             qnEnd
         )
+
+        ----------------------------------------------------
+        -- Second note.
+        ----------------------------------------------------
 
         if secondQN <
            pairEndQN - 0.0000001 then
@@ -1028,6 +1048,21 @@ local function insertTripletGrid(
     qnEnd,
     subdivisionQN
 )
+
+    --------------------------------------------------------
+    -- Divide every selected subdivision into three equal
+    -- parts.
+    --
+    -- Example:
+    --
+    -- Eighth:
+    --
+    -- 0.5 QN
+    --
+    -- triplet spacing:
+    --
+    -- 0.1666667 QN
+    --------------------------------------------------------
 
     local tripletQN =
         subdivisionQN / 3
@@ -1057,10 +1092,14 @@ local function insertTripletGrid(
 end
 
 ------------------------------------------------------------
--- INSERT HI-HAT
+-- INSERT HI-HAT / DRUM
 ------------------------------------------------------------
 
-local function insertHiHat()
+local function insertDrum()
+
+    --------------------------------------------------------
+    -- Get exact first measure boundaries.
+    --------------------------------------------------------
 
     local measureStartTime,
           qnStart,
@@ -1071,6 +1110,10 @@ local function insertHiHat()
             PROJ,
             0
         )
+
+    --------------------------------------------------------
+    -- Validate.
+    --------------------------------------------------------
 
     if not measureStartTime
     or not qnStart
@@ -1085,6 +1128,15 @@ local function insertHiHat()
         return
     end
 
+    --------------------------------------------------------
+    -- IMPORTANT:
+    --
+    -- Do not calculate the bar length from numerator /
+    -- denominator.
+    --
+    -- REAPER has already supplied the exact QN boundaries.
+    --------------------------------------------------------
+
     if qnEnd <= qnStart then
 
         reaper.ShowMessageBox(
@@ -1097,7 +1149,7 @@ local function insertHiHat()
     end
 
     --------------------------------------------------------
-    -- Exact measure end.
+    -- Convert exact QN end to project time.
     --------------------------------------------------------
 
     local measureEndTime =
@@ -1119,22 +1171,42 @@ local function insertHiHat()
     end
 
     --------------------------------------------------------
-    -- Selected subdivision.
+    -- Selected subdivision in quarter-note units.
+    --
+    -- Quarter = 1 QN
+    -- Eighth  = 0.5 QN
+    -- 16th    = 0.25 QN
+    -- 32nd    = 0.125 QN
+    -- 64th    = 0.0625 QN
     --------------------------------------------------------
 
     local subdivisionQN =
         1 /
         subdivisionValues[subdivisionChoice]
 
+    if subdivisionQN <= 0 then
+
+        reaper.ShowMessageBox(
+            "Could not calculate the subdivision.",
+            TITLE,
+            0
+        )
+
+        return
+    end
+
     --------------------------------------------------------
-    -- Undo.
+    -- Begin undo.
     --------------------------------------------------------
 
     reaper.Undo_BeginBlock()
-    reaper.PreventUIRefresh(1)
+
+    reaper.PreventUIRefresh(
+        1
+    )
 
     --------------------------------------------------------
-    -- Create MIDI item.
+    -- Create exact one-measure MIDI item.
     --------------------------------------------------------
 
     local item =
@@ -1147,10 +1219,12 @@ local function insertHiHat()
 
     if not item then
 
-        reaper.PreventUIRefresh(-1)
+        reaper.PreventUIRefresh(
+            -1
+        )
 
         reaper.Undo_EndBlock(
-            "Insert Hi-Hat MIDI",
+            "Insert Drum MIDI",
             -1
         )
 
@@ -1164,7 +1238,7 @@ local function insertHiHat()
     end
 
     --------------------------------------------------------
-    -- Exact boundaries.
+    -- Force exact item position.
     --------------------------------------------------------
 
     reaper.SetMediaItemInfo_Value(
@@ -1173,11 +1247,19 @@ local function insertHiHat()
         measureStartTime
     )
 
+    --------------------------------------------------------
+    -- Force exact item length.
+    --------------------------------------------------------
+
     reaper.SetMediaItemInfo_Value(
         item,
         "D_LENGTH",
         measureEndTime - measureStartTime
     )
+
+    --------------------------------------------------------
+    -- Never loop the MIDI source.
+    --------------------------------------------------------
 
     reaper.SetMediaItemInfo_Value(
         item,
@@ -1186,7 +1268,7 @@ local function insertHiHat()
     )
 
     --------------------------------------------------------
-    -- MIDI take.
+    -- Get MIDI take.
     --------------------------------------------------------
 
     local take =
@@ -1202,10 +1284,12 @@ local function insertHiHat()
             item
         )
 
-        reaper.PreventUIRefresh(-1)
+        reaper.PreventUIRefresh(
+            -1
+        )
 
         reaper.Undo_EndBlock(
-            "Insert Hi-Hat MIDI",
+            "Insert Drum MIDI",
             -1
         )
 
@@ -1219,7 +1303,7 @@ local function insertHiHat()
     end
 
     --------------------------------------------------------
-    -- Generate.
+    -- Generate selected feel.
     --------------------------------------------------------
 
     if feelChoice == 1 then
@@ -1251,7 +1335,7 @@ local function insertHiHat()
     end
 
     --------------------------------------------------------
-    -- Sort.
+    -- Sort MIDI events.
     --------------------------------------------------------
 
     reaper.MIDI_Sort(
@@ -1259,7 +1343,7 @@ local function insertHiHat()
     )
 
     --------------------------------------------------------
-    -- Select.
+    -- Select track and item.
     --------------------------------------------------------
 
     reaper.SetOnlyTrackSelected(
@@ -1271,16 +1355,26 @@ local function insertHiHat()
         true
     )
 
+    --------------------------------------------------------
+    -- Update.
+    --------------------------------------------------------
+
     reaper.UpdateItemInProject(
         item
     )
 
     reaper.UpdateArrange()
 
-    reaper.PreventUIRefresh(-1)
+    --------------------------------------------------------
+    -- Finish.
+    --------------------------------------------------------
+
+    reaper.PreventUIRefresh(
+        -1
+    )
 
     reaper.Undo_EndBlock(
-        "Insert Hi-Hat MIDI - Exactly One Bar",
+        "Insert Drum MIDI - Exactly One Bar",
         -1
     )
 end
@@ -1313,7 +1407,7 @@ local function guiLoop()
     end
 
     --------------------------------------------------------
-    -- ESC.
+    -- ESC = CANCEL
     --------------------------------------------------------
 
     if char == 27 then
@@ -1327,7 +1421,7 @@ local function guiLoop()
     end
 
     --------------------------------------------------------
-    -- ENTER.
+    -- ENTER = INSERT
     --------------------------------------------------------
 
     if char == 13 then
@@ -1346,7 +1440,7 @@ local function guiLoop()
     drawWindow()
 
     --------------------------------------------------------
-    -- Mouse.
+    -- Mouse state.
     --------------------------------------------------------
 
     local mouseCap =
@@ -1360,10 +1454,27 @@ local function guiLoop()
     if clicked then
 
         ----------------------------------------------------
-        -- Subdivision.
+        -- Instrument dropdown.
         ----------------------------------------------------
 
         if mouseIn(
+            fieldX,
+            instrumentY,
+            fieldW,
+            fieldH
+        ) then
+
+            instrumentChoice =
+                showDropdown(
+                    instrumentNames,
+                    instrumentChoice
+                )
+
+        ----------------------------------------------------
+        -- Subdivision dropdown.
+        ----------------------------------------------------
+
+        elseif mouseIn(
             fieldX,
             subdivisionY,
             fieldW,
@@ -1377,7 +1488,7 @@ local function guiLoop()
                 )
 
         ----------------------------------------------------
-        -- Feel.
+        -- Feel dropdown.
         ----------------------------------------------------
 
         elseif mouseIn(
@@ -1394,7 +1505,7 @@ local function guiLoop()
                 )
 
         ----------------------------------------------------
-        -- Insert.
+        -- INSERT.
         ----------------------------------------------------
 
         elseif mouseIn(
@@ -1411,7 +1522,7 @@ local function guiLoop()
             return
 
         ----------------------------------------------------
-        -- Cancel.
+        -- CANCEL.
         ----------------------------------------------------
 
         elseif mouseIn(
@@ -1434,7 +1545,7 @@ local function guiLoop()
         mouseCap
 
     --------------------------------------------------------
-    -- Continue.
+    -- Continue GUI.
     --------------------------------------------------------
 
     reaper.defer(
@@ -1461,7 +1572,7 @@ local function finishDialog()
         return
     end
 
-    insertHiHat()
+    insertDrum()
 end
 
 ------------------------------------------------------------
@@ -1490,7 +1601,7 @@ reaper.defer(
 )
 
 ------------------------------------------------------------
--- WAIT FOR COMPLETION
+-- WAIT FOR DIALOG
 ------------------------------------------------------------
 
 reaper.defer(
