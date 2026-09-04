@@ -1,0 +1,207 @@
+;---------------------------------------------------------------
+desc:Simple 16-Step Drum Machine
+author:ChatGPT
+version:1.0
+about:
+  A very simple four-sound, 16-step drum machine.
+  Kick, Snare, Closed Hat and Open Hat are synthesized internally.
+  Click the step buttons to create a pattern.
+---------------------------------------------------------------
+
+slider1:120<40,240,1>BPM
+slider2:0<0,1,1{Stopped,Playing}>Transport
+
+in_pin:none
+out_pin:Stereo Out
+
+@init
+// Pattern: 4 rows x 16 steps
+// Row 0 = Kick, 1 = Snare, 2 = Closed Hat, 3 = Open Hat
+i = 0;
+loop(64,
+  pattern[i] = 0;
+  i += 1;
+);
+
+// Useful default pattern
+pattern[0]=1; pattern[4]=1; pattern[8]=1; pattern[12]=1;
+pattern[2]=1; pattern[6]=1; pattern[10]=1; pattern[14]=1;
+pattern[4+16]=1; pattern[12+16]=1;
+i=0;
+loop(16,
+  pattern[i+32]=1;
+  i+=1;
+);
+
+step = 0;
+last_step = -1;
+samples_to_step = 0;
+phase = 0;
+
+kick_env = 0;
+kick_phase = 0;
+snare_env = 0;
+snare_seed = 1;
+hat_env = 0;
+ohat_env = 0;
+
+function trigger(row)
+(
+  row == 0 ? (
+    kick_env = 1;
+    kick_phase = 0;
+  );
+
+  row == 1 ? (
+    snare_env = 1;
+    snare_seed = 12345;
+  );
+
+  row == 2 ? (
+    hat_env = 1;
+  );
+
+  row == 3 ? (
+    ohat_env = 1;
+  );
+);
+
+function noise()
+(
+  snare_seed = (snare_seed * 16807) % 2147483647;
+  (snare_seed / 1073741823.5) - 1;
+);
+
+@slider
+bpm = slider1;
+playing = slider2;
+
+@block
+// Step length = quarter note / 4 = 16th note.
+// We calculate it from the current sample rate.
+step_samples = srate * 60 / bpm / 4;
+
+@sample
+playing ? (
+  samples_to_step <= 0 ? (
+    step = step % 16;
+
+    row = 0;
+    loop(4,
+      pattern[row*16 + step] ? trigger(row);
+      row += 1;
+    );
+
+    last_step = step;
+    step += 1;
+    samples_to_step += step_samples;
+  );
+
+  samples_to_step -= 1;
+);
+
+// -------------------------
+// Drum synthesis
+// -------------------------
+
+out = 0;
+
+// Kick: falling sine pitch + exponential decay
+kick_env > 0.00001 ? (
+  kick_freq = 55 + 105 * kick_env;
+  kick_phase += 2*$pi*kick_freq/srate;
+  out += sin(kick_phase) * kick_env * 0.8;
+  kick_env *= 0.994;
+);
+
+// Snare: noise + short tonal component
+snare_env > 0.00001 ? (
+  out += noise() * snare_env * 0.35;
+  out += sin(2*$pi*190*phase) * snare_env * 0.12;
+  snare_env *= 0.985;
+);
+
+// Closed hat
+hat_env > 0.00001 ? (
+  out += noise() * hat_env * 0.18;
+  hat_env *= 0.90;
+);
+
+// Open hat
+ohat_env > 0.00001 ? (
+  out += noise() * ohat_env * 0.14;
+  ohat_env *= 0.985;
+);
+
+phase += 1/srate;
+
+spl0 = out;
+spl1 = out;
+
+@gfx 520 300
+gfx_clear = 0;
+
+gfx_x = 10;
+gfx_y = 8;
+gfx_setfont(1, "Arial", 20);
+gfx_drawstr("Simple 16-Step Drum Machine");
+
+gfx_setfont(1, "Arial", 14);
+gfx_x = 10;
+gfx_y = 42;
+gfx_drawstr("BPM: ");
+gfx_drawnumber(bpm, 0);
+
+gfx_x = 10;
+gfx_y = 65;
+gfx_drawstr(playing ? "PLAYING" : "STOPPED");
+
+cell_w = 28;
+cell_h = 32;
+left = 95;
+top = 90;
+
+row = 0;
+loop(4,
+  row == 0 ? name = "Kick";
+  row == 1 ? name = "Snare";
+  row == 2 ? name = "CH Hat";
+  row == 3 ? name = "OH Hat";
+
+  gfx_x = 10;
+  gfx_y = top + row*cell_h + 9;
+  gfx_drawstr(name);
+
+  col = 0;
+  loop(16,
+    x = left + col*cell_w;
+    y = top + row*cell_h;
+
+    pattern[row*16+col] ? gfx_set(0.8,0.8,0.8) : gfx_set(0.18,0.18,0.18);
+    gfx_rect(x,y,cell_w-2,cell_h-2,1);
+
+    col == last_step && playing ? (
+      gfx_set(1,0.2,0.2);
+      gfx_rect(x,y,cell_w-2,cell_h-2,0);
+    );
+
+    col += 1;
+  );
+  row += 1;
+);
+
+// Mouse editing
+mouse_cap & 1 ? (
+  mouse_x >= left && mouse_x < left + 16*cell_w &&
+  mouse_y >= top && mouse_y < top + 4*cell_h ? (
+    mcol = floor((mouse_x-left)/cell_w);
+    mrow = floor((mouse_y-top)/cell_h);
+    mindex = mrow*16+mcol;
+
+    !mouse_was_down ? (
+      pattern[mindex] = !pattern[mindex];
+    );
+  );
+);
+
+mouse_was_down = mouse_cap & 1;
