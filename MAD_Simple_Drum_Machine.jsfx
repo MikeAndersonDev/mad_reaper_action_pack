@@ -1,6 +1,5 @@
 ;---------------------------------------------------------------
 desc:Simple 16-Step Drum Machine
-author:ChatGPT
 version:1.0
 about:
   A very simple four-sound, 16-step drum machine.
