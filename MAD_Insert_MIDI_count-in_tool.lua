@@ -527,33 +527,43 @@ end
 
 ------------------------------------------------------------
 -- CROSS-PLATFORM CENTER POSITION
+--
+-- Centers the popup on the monitor containing the CENTER
+-- of the REAPER main window.
+--
+-- Uses JS_Window_GetViewportFromRect(), which is designed
+-- specifically to determine the monitor/work area.
+--
+-- wantWork = true:
+--   Excludes taskbar / dock / desktop toolbars where the
+--   operating system provides that information.
+--
+-- This is preferable to JS_Window_FromPoint(), because
+-- JS_Window_FromPoint() returns a WINDOW, not a MONITOR.
 ------------------------------------------------------------
 
 local function getCenteredPosition()
 
     --------------------------------------------------------
-    -- Default fallback.
-    --
-    -- gfx coordinates are screen coordinates when the
-    -- parent is 0.
+    -- Start with a safe fallback.
     --------------------------------------------------------
 
     local x = 0
     local y = 0
 
     --------------------------------------------------------
-    -- JS_ReaScriptAPI required for monitor/work-area info.
+    -- JS_ReaScriptAPI required.
     --------------------------------------------------------
 
-    if not reaper.JS_Window_GetRect then
-
-        ----------------------------------------------------
-        -- No JS API:
-        -- use primary-screen fallback if available.
-        ----------------------------------------------------
+    if not reaper.JS_Window_GetRect
+    or not reaper.JS_Window_GetViewportFromRect then
 
         return x, y
     end
+
+    --------------------------------------------------------
+    -- Get REAPER main window.
+    --------------------------------------------------------
 
     local mainHWND =
         reaper.GetMainHwnd()
@@ -563,7 +573,7 @@ local function getCenteredPosition()
     end
 
     --------------------------------------------------------
-    -- Get REAPER's current screen position.
+    -- Get REAPER's actual screen rectangle.
     --------------------------------------------------------
 
     local ok,
@@ -580,70 +590,54 @@ local function getCenteredPosition()
     end
 
     --------------------------------------------------------
-    -- Determine monitor containing the center of REAPER.
+    -- Use the CENTER POINT of REAPER's main window.
     --
-    -- JS_Window_FromPoint() is used so multi-monitor
-    -- setups work correctly.
+    -- We make this a 1x1 rectangle.
+    --
+    -- GetViewportFromRect() will therefore select the
+    -- monitor containing this point.
     --------------------------------------------------------
 
-    local centerScreenX =
+    local centerX =
         math.floor(
             (left + right) / 2
         )
 
-    local centerScreenY =
+    local centerY =
         math.floor(
             (top + bottom) / 2
         )
 
-    local monitorHWND = nil
-
-    if reaper.JS_Window_FromPoint then
-
-        monitorHWND =
-            reaper.JS_Window_FromPoint(
-                centerScreenX,
-                centerScreenY
-            )
-    end
-
     --------------------------------------------------------
-    -- If we cannot identify the monitor, center relative
-    -- to REAPER's screen rectangle.
-    --------------------------------------------------------
-
-    if not monitorHWND then
-
-        x =
-            math.floor(
-                (left + right - WINDOW_W) / 2
-            )
-
-        y =
-            math.floor(
-                (top + bottom - WINDOW_H) / 2
-            )
-
-        return x, y
-    end
-
-    --------------------------------------------------------
-    -- Get monitor/work-area information.
+    -- Ask JS_ReaScriptAPI for the monitor WORK AREA.
     --
-    -- JS_Window_GetRect on the monitor window gives the
-    -- physical monitor rectangle on supported systems.
+    -- true = exclude taskbar / dock / desktop toolbar.
     --------------------------------------------------------
 
-    local mok,
-          mleft,
-          mtop,
-          mright,
-          mbottom =
-        reaper.JS_Window_GetRect(
-            monitorHWND
+    local monitorLeft,
+          monitorTop,
+          monitorRight,
+          monitorBottom =
+        reaper.JS_Window_GetViewportFromRect(
+            centerX,
+            centerY,
+            centerX + 1,
+            centerY + 1,
+            true
         )
 
-    if not mok then
+    --------------------------------------------------------
+    -- Validate returned monitor rectangle.
+    --------------------------------------------------------
+
+    if not monitorLeft
+    or not monitorTop
+    or not monitorRight
+    or not monitorBottom then
+
+        ----------------------------------------------------
+        -- Fallback: center on REAPER itself.
+        ----------------------------------------------------
 
         x =
             math.floor(
@@ -659,23 +653,36 @@ local function getCenteredPosition()
     end
 
     --------------------------------------------------------
-    -- Center on the selected monitor.
+    -- Center the 320 x 190 popup inside the monitor's
+    -- usable work area.
+    --
+    -- IMPORTANT:
+    --
+    -- These coordinates are the TOP-LEFT of the popup.
+    -- We subtract HALF the popup dimensions.
     --------------------------------------------------------
 
     x =
         math.floor(
-            mleft +
-            ((mright - mleft) - WINDOW_W) / 2
+            monitorLeft +
+            (
+                (monitorRight - monitorLeft)
+                - WINDOW_W
+            ) / 2
         )
 
     y =
         math.floor(
-            mtop +
-            ((mbottom - mtop) - WINDOW_H) / 2
+            monitorTop +
+            (
+                (monitorBottom - monitorTop)
+                - WINDOW_H
+            ) / 2
         )
 
     return x, y
 end
+
 
 ------------------------------------------------------------
 -- OPEN WINDOW
@@ -1475,26 +1482,16 @@ gfx.init(
 )
 
 ------------------------------------------------------------
--- Give the OS one defer cycle to create the native
--- window, then make one corrective positioning pass.
-------------------------------------------------------------
-
-local function delayedCenter()
-
-    correctPopupPosition()
-end
-
-reaper.defer(
-    delayedCenter
-)
-
-------------------------------------------------------------
--- START
+-- START GUI
 ------------------------------------------------------------
 
 reaper.defer(
     guiLoop
 )
+
+------------------------------------------------------------
+-- WAIT FOR COMPLETION
+------------------------------------------------------------
 
 reaper.defer(
     finishDialog
