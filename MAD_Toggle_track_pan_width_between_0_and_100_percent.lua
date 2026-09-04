@@ -1,7 +1,7 @@
 --[[
-  ReaScript Name: Toggle selected tracks width 100% / 0%
+  ReaScript Name: Toggle selected tracks pan width 100% / 0%
 
-  Toggles track width between:
+  Toggles track pan width between:
 
     100% = Stereo
       0% = Mono
