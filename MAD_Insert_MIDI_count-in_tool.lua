@@ -1,24 +1,27 @@
 --[[
     REAPER Lua Action
-    Insert Hi-Hat count-in MIDI, for One Bar
+    Insert Hi-Hat MIDI - Exactly One Bar
 
-    TIME-SIGNATURE-AWARE HI-HAT GENERATOR
-
-    Requirement: JS_ReaScriptAPI, REAPER extension for reliable window positioning.
-
+    CROSS-PLATFORM VERSION
+    ----------------------
 
     Popup:
-        Subdivision:
-            Quarter
-            Eighth
-            Sixteenth
-            32nd
-            64th
+        320 x 190
 
-        Feel:
-            Normal
-            Swing
-            Triplet
+    The popup is centered on the monitor containing
+    the REAPER main window.
+
+    Subdivision:
+        Quarter
+        Eighth
+        Sixteenth
+        32nd
+        64th
+
+    Feel:
+        Normal
+        Swing
+        Triplet
 
     Defaults:
         Quarter
@@ -29,61 +32,17 @@
         Esc   = Cancel
 
     MIDI:
-        Note     = 42 (GM Closed Hi-Hat)
-        Channel  = 10 (zero-based channel 9)
-        Velocity = 100
+        Closed Hi-Hat = 42
+        Channel       = 10
+        Velocity      = 100
 
-    The MIDI item:
-        - Is exactly one project measure long
-        - Starts at the exact measure boundary
-        - Ends at the exact measure boundary
-        - Does not loop
-        - Uses the current project time signature
+    Requires:
+        JS_ReaScriptAPI
 
-    FEEL BEHAVIOR
-
-        Normal:
-            Evenly spaced selected subdivisions.
-
-        Swing:
-            Pairs of subdivisions use a 2:1 long/short ratio.
-
-            Example: Eighths
-
-                1     &     2     &
-                X           X     X
-                <---2---><--1-->
-
-            Swing is applied to pairs of the selected
-            subdivision.
-
-        Triplet:
-            Each normal subdivision is divided into
-            three evenly spaced triplet positions.
-
-    TIME SIGNATURE EXAMPLES
-
-        3/4:
-            Quarter = 3
-            Eighth  = 6
-            16th    = 12
-
-        4/4:
-            Quarter = 4
-            Eighth  = 8
-            16th    = 16
-
-        6/8:
-            Eighth         = 6
-            Dotted-quarter = 2
-
-        9/8:
-            Eighth         = 9
-            Dotted-quarter = 3
-
-        12/8:
-            Eighth         = 12
-            Dotted-quarter = 4
+    Time signature:
+        Uses REAPER's exact measure QN boundaries.
+        Works with 2/4, 3/4, 4/4, 5/4,
+        6/8, 7/8, 9/8, 12/8, etc.
 ]]
 
 ------------------------------------------------------------
@@ -92,10 +51,10 @@
 
 local PROJ = 0
 
+local TITLE = "Insert Hi-Hat MIDI"
+
 local WINDOW_W = 320
 local WINDOW_H = 190
-
-local TITLE = "Insert Hi-Hat MIDI"
 
 ------------------------------------------------------------
 -- SUBDIVISIONS
@@ -109,13 +68,12 @@ local subdivisionNames = {
     "64th"
 }
 
--- Number of selected notes per quarter note.
 local subdivisionValues = {
-    1,      -- Quarter
-    2,      -- Eighth
-    4,      -- Sixteenth
-    8,      -- 32nd
-    16      -- 64th
+    1,
+    2,
+    4,
+    8,
+    16
 }
 
 ------------------------------------------------------------
@@ -129,32 +87,38 @@ local feelNames = {
 }
 
 ------------------------------------------------------------
--- MIDI SETTINGS
-------------------------------------------------------------
-
-local MIDI_NOTE = 42
-local MIDI_CHANNEL = 9       -- MIDI channel 10, zero-based
-local MIDI_VELOCITY = 100
-
-------------------------------------------------------------
 -- DEFAULTS
 ------------------------------------------------------------
 
-local subdivisionChoice = 1  -- Quarter
-local feelChoice = 1         -- Normal
+local subdivisionChoice = 1
+local feelChoice = 1
+
+------------------------------------------------------------
+-- MIDI
+------------------------------------------------------------
+
+local MIDI_NOTE = 42
+local MIDI_CHANNEL = 9
+local MIDI_VELOCITY = 100
 
 ------------------------------------------------------------
 -- SELECTED TRACK
 ------------------------------------------------------------
 
-local track = reaper.GetSelectedTrack(PROJ, 0)
+local track =
+    reaper.GetSelectedTrack(
+        PROJ,
+        0
+    )
 
 if not track then
+
     reaper.ShowMessageBox(
         "Please select a track first.",
         TITLE,
         0
     )
+
     return
 end
 
@@ -164,6 +128,7 @@ end
 
 local dialogDone = false
 local cancelled = false
+
 local lastMouseCap = 0
 
 ------------------------------------------------------------
@@ -171,693 +136,17 @@ local lastMouseCap = 0
 ------------------------------------------------------------
 
 local COLORS = {
-    background = {0.115, 0.115, 0.125, 1.0},
-    panel      = {0.155, 0.155, 0.170, 1.0},
-    border     = {0.32,  0.32,  0.35,  1.0},
-    text       = {0.92,  0.92,  0.94,  1.0},
-    label      = {0.68,  0.68,  0.72,  1.0},
-    blue       = {0.20,  0.48,  0.78,  1.0},
-    blueHover  = {0.25,  0.55,  0.88,  1.0},
-    button     = {0.22,  0.22,  0.24,  1.0},
-    hover      = {0.28,  0.28,  0.31,  1.0},
-    white      = {1.0, 1.0, 1.0, 1.0}
+    background = {0.115, 0.115, 0.125, 1},
+    panel      = {0.155, 0.155, 0.170, 1},
+    border     = {0.32, 0.32, 0.35, 1},
+    text       = {0.92, 0.92, 0.94, 1},
+    label      = {0.68, 0.68, 0.72, 1},
+    blue       = {0.20, 0.48, 0.78, 1},
+    blueHover  = {0.25, 0.55, 0.88, 1},
+    button     = {0.22, 0.22, 0.24, 1},
+    hover      = {0.28, 0.28, 0.31, 1},
+    white      = {1, 1, 1, 1}
 }
-
-------------------------------------------------------------
--- COLOR HELPER
-------------------------------------------------------------
-
-local function setColor(c)
-    gfx.set(c[1], c[2], c[3], c[4])
-end
-
-------------------------------------------------------------
--- RECTANGLE HELPER
-------------------------------------------------------------
-
-local function drawRect(x, y, w, h, color, filled)
-    setColor(color)
-    gfx.rect(x, y, w, h, filled ~= false)
-end
-
-------------------------------------------------------------
--- MOUSE HIT TEST
-------------------------------------------------------------
-
-local function mouseIn(x, y, w, h)
-    return gfx.mouse_x >= x
-       and gfx.mouse_x <= x + w
-       and gfx.mouse_y >= y
-       and gfx.mouse_y <= y + h
-end
-
-------------------------------------------------------------
--- DRAW BUTTON
-------------------------------------------------------------
-
-local function drawButton(x, y, w, h, text, hovered, primary)
-
-    local color
-
-    if primary then
-        color = hovered and COLORS.blueHover or COLORS.blue
-    else
-        color = hovered and COLORS.hover or COLORS.button
-    end
-
-    drawRect(x, y, w, h, color, true)
-
-    setColor(COLORS.border)
-    gfx.rect(x, y, w, h, false)
-
-    gfx.setfont(1, "Arial", 14)
-    setColor(COLORS.white)
-
-    local tw = gfx.measurestr(text)
-
-    gfx.x = x + (w - tw) * 0.5
-    gfx.y = y + (h - 14) * 0.5
-
-    gfx.drawstr(text)
-end
-
-------------------------------------------------------------
--- DRAW DROPDOWN
-------------------------------------------------------------
-
-local function drawDropdown(x, y, w, h, text, hovered)
-
-    local color = hovered and COLORS.hover or COLORS.panel
-
-    drawRect(x, y, w, h, color, true)
-
-    setColor(COLORS.border)
-    gfx.rect(x, y, w, h, false)
-
-    --------------------------------------------------------
-    -- Text
-    --------------------------------------------------------
-
-    gfx.setfont(1, "Arial", 14)
-    setColor(COLORS.text)
-
-    gfx.x = x + 10
-    gfx.y = y + (h - 14) * 0.5
-
-    gfx.drawstr(text)
-
-    --------------------------------------------------------
-    -- Dropdown arrow
-    --------------------------------------------------------
-
-    local arrowX = x + w - 20
-    local arrowY = y + h * 0.5
-
-    setColor(COLORS.label)
-
-    gfx.triangle(
-        arrowX - 5,
-        arrowY - 3,
-        arrowX + 5,
-        arrowY - 3,
-        arrowX,
-        arrowY + 4
-    )
-end
-
-------------------------------------------------------------
--- SHOW DROPDOWN
-------------------------------------------------------------
-
-local function showDropdown(items, current)
-
-    local menu = table.concat(items, "|")
-
-    local selected = gfx.showmenu(menu)
-
-    if selected >= 1 and selected <= #items then
-        return selected
-    end
-
-    return current
-end
-
-------------------------------------------------------------
--- INSERT NOTE HELPER
-------------------------------------------------------------
-
-local function insertNote(
-    take,
-    startQN,
-    endQN,
-    barEndQN
-)
-
-    if startQN >= barEndQN then
-        return
-    end
-
-    endQN = math.min(endQN, barEndQN)
-
-    if endQN <= startQN then
-        return
-    end
-
-    local startPPQ =
-        reaper.MIDI_GetPPQPosFromProjQN(
-            take,
-            startQN
-        )
-
-    local endPPQ =
-        reaper.MIDI_GetPPQPosFromProjQN(
-            take,
-            endQN
-        )
-
-    --------------------------------------------------------
-    -- Short hi-hat note.
-    --
-    -- 25% of the interval, minimum 1 PPQ.
-    --------------------------------------------------------
-
-    local spacingPPQ = endPPQ - startPPQ
-
-    local noteLengthPPQ =
-        math.max(
-            1,
-            spacingPPQ * 0.25
-        )
-
-    local noteEndPPQ =
-        math.min(
-            startPPQ + noteLengthPPQ,
-            reaper.MIDI_GetPPQPosFromProjQN(
-                take,
-                barEndQN
-            )
-        )
-
-    if noteEndPPQ > startPPQ then
-
-        reaper.MIDI_InsertNote(
-            take,
-            false,              -- selected
-            false,              -- muted
-            startPPQ,
-            noteEndPPQ,
-            MIDI_CHANNEL,
-            MIDI_NOTE,
-            MIDI_VELOCITY,
-            true                -- noSort
-        )
-    end
-end
-
-------------------------------------------------------------
--- INSERT NORMAL GRID
-------------------------------------------------------------
-
-local function insertNormalGrid(
-    take,
-    qnStart,
-    qnEnd,
-    subdivisionQN
-)
-
-    local currentQN = qnStart
-
-    while currentQN < qnEnd - 0.0000001 do
-
-        local nextQN =
-            math.min(
-                currentQN + subdivisionQN,
-                qnEnd
-            )
-
-        insertNote(
-            take,
-            currentQN,
-            nextQN,
-            qnEnd
-        )
-
-        currentQN = nextQN
-    end
-end
-
-------------------------------------------------------------
--- INSERT SWING GRID
-------------------------------------------------------------
-
-local function insertSwingGrid(
-    take,
-    qnStart,
-    qnEnd,
-    subdivisionQN
-)
-
-    --------------------------------------------------------
-    -- Swing works in pairs.
-    --
-    -- A pair has the duration of:
-    --
-    --     2 x subdivision
-    --
-    -- The first note occupies 2/3 of the pair.
-    -- The second note occurs at 2/3.
-    --
-    -- This produces a 2:1 long-short relationship.
-    --
-    -- Example with eighth notes:
-    --
-    -- Straight:
-    --     0.0     0.5
-    --
-    -- Swing:
-    --     0.0     0.6667
-    --
-    --------------------------------------------------------
-
-    local pairQN = subdivisionQN * 2.0
-
-    local currentQN = qnStart
-
-    while currentQN < qnEnd - 0.0000001 do
-
-        local pairEndQN =
-            math.min(
-                currentQN + pairQN,
-                qnEnd
-            )
-
-        local pairLength =
-            pairEndQN - currentQN
-
-        if pairLength <= 0 then
-            break
-        end
-
-        ----------------------------------------------------
-        -- For a complete pair:
-        --
-        -- first position = 0
-        -- second position = 2/3
-        ----------------------------------------------------
-
-        local firstQN = currentQN
-
-        local secondQN =
-            currentQN + pairLength * (2.0 / 3.0)
-
-        ----------------------------------------------------
-        -- First note
-        ----------------------------------------------------
-
-        insertNote(
-            take,
-            firstQN,
-            secondQN,
-            qnEnd
-        )
-
-        ----------------------------------------------------
-        -- Second note
-        --
-        -- Only insert if there is enough room.
-        ----------------------------------------------------
-
-        if secondQN < pairEndQN - 0.0000001 then
-
-            insertNote(
-                take,
-                secondQN,
-                pairEndQN,
-                qnEnd
-            )
-        end
-
-        currentQN = pairEndQN
-    end
-end
-
-------------------------------------------------------------
--- INSERT TRIPLET GRID
-------------------------------------------------------------
-
-local function insertTripletGrid(
-    take,
-    qnStart,
-    qnEnd,
-    subdivisionQN
-)
-
-    --------------------------------------------------------
-    -- One normal subdivision is divided into 3 parts.
-    --
-    -- Example:
-    --
-    -- Eighth = 0.5 QN
-    --
-    -- Triplet positions:
-    --
-    -- 0
-    -- 0.1666667
-    -- 0.3333333
-    --
-    -- then next eighth:
-    -- 0.5
-    --
-    --------------------------------------------------------
-
-    local tripletQN =
-        subdivisionQN / 3.0
-
-    local currentQN = qnStart
-
-    while currentQN < qnEnd - 0.0000001 do
-
-        local nextQN =
-            math.min(
-                currentQN + tripletQN,
-                qnEnd
-            )
-
-        insertNote(
-            take,
-            currentQN,
-            nextQN,
-            qnEnd
-        )
-
-        currentQN = nextQN
-    end
-end
-
-------------------------------------------------------------
--- INSERT HI-HAT
-------------------------------------------------------------
-
-local function insertHiHat()
-
-    --------------------------------------------------------
-    -- Get exact first measure information.
-    --------------------------------------------------------
-
-    local measureStartTime,
-          qnStart,
-          qnEnd,
-          numerator,
-          denominator,
-          tempo =
-        reaper.TimeMap_GetMeasureInfo(
-            PROJ,
-            0
-        )
-
-    if not measureStartTime
-    or not qnStart
-    or not qnEnd then
-
-        reaper.ShowMessageBox(
-            "Could not determine the first project measure.",
-            TITLE,
-            0
-        )
-
-        return
-    end
-
-    --------------------------------------------------------
-    -- Validate QN range.
-    --------------------------------------------------------
-
-    if qnEnd <= qnStart then
-
-        reaper.ShowMessageBox(
-            "The first project measure has an invalid QN range.",
-            TITLE,
-            0
-        )
-
-        return
-    end
-
-    --------------------------------------------------------
-    -- Get exact measure end in project time.
-    --
-    -- TimeMap2_QNToTime takes the project and QN.
-    --------------------------------------------------------
-
-    local measureEndTime =
-        reaper.TimeMap2_QNToTime(
-            PROJ,
-            qnEnd
-        )
-
-    if not measureEndTime
-    or measureEndTime <= measureStartTime then
-
-        reaper.ShowMessageBox(
-            "The first project measure has an invalid time range.",
-            TITLE,
-            0
-        )
-
-        return
-    end
-
-    --------------------------------------------------------
-    -- Get time signature.
-    --------------------------------------------------------
-
-    numerator =
-        tonumber(numerator) or 4
-
-    denominator =
-        tonumber(denominator) or 4
-
-    --------------------------------------------------------
-    -- Actual bar length.
-    --
-    -- We intentionally use the QN range returned by REAPER
-    -- rather than calculating the bar ourselves.
-    --
-    -- This makes the script safe with:
-    --
-    -- 2/4
-    -- 3/4
-    -- 4/4
-    -- 5/4
-    -- 6/8
-    -- 7/8
-    -- 9/8
-    -- 12/8
-    -- etc.
-    --------------------------------------------------------
-
-    local barQN =
-        qnEnd - qnStart
-
-    if barQN <= 0 then
-
-        reaper.ShowMessageBox(
-            "The measure duration is invalid.",
-            TITLE,
-            0
-        )
-
-        return
-    end
-
-    --------------------------------------------------------
-    -- Base subdivision.
-    --------------------------------------------------------
-
-    local subdivisionQN =
-        1.0 /
-        subdivisionValues[subdivisionChoice]
-
-    if subdivisionQN <= 0 then
-
-        reaper.ShowMessageBox(
-            "Could not calculate the subdivision.",
-            TITLE,
-            0
-        )
-
-        return
-    end
-
-    --------------------------------------------------------
-    -- BEGIN UNDO
-    --------------------------------------------------------
-
-    reaper.Undo_BeginBlock()
-    reaper.PreventUIRefresh(1)
-
-    --------------------------------------------------------
-    -- CREATE EXACT ONE-BAR MIDI ITEM
-    --------------------------------------------------------
-
-    local item =
-        reaper.CreateNewMIDIItemInProj(
-            track,
-            measureStartTime,
-            measureEndTime,
-            false
-        )
-
-    if not item then
-
-        reaper.PreventUIRefresh(-1)
-
-        reaper.Undo_EndBlock(
-            "Insert Hi-Hat MIDI - Exactly One Bar",
-            -1
-        )
-
-        reaper.ShowMessageBox(
-            "Could not create the MIDI item.",
-            TITLE,
-            0
-        )
-
-        return
-    end
-
-    --------------------------------------------------------
-    -- FORCE EXACT ITEM BOUNDARIES
-    --------------------------------------------------------
-
-    reaper.SetMediaItemInfo_Value(
-        item,
-        "D_POSITION",
-        measureStartTime
-    )
-
-    reaper.SetMediaItemInfo_Value(
-        item,
-        "D_LENGTH",
-        measureEndTime - measureStartTime
-    )
-
-    --------------------------------------------------------
-    -- DISABLE MIDI SOURCE LOOPING
-    --------------------------------------------------------
-
-    reaper.SetMediaItemInfo_Value(
-        item,
-        "B_LOOPSRC",
-        0
-    )
-
-    --------------------------------------------------------
-    -- GET MIDI TAKE
-    --------------------------------------------------------
-
-    local take =
-        reaper.GetActiveTake(item)
-
-    if not take
-    or not reaper.TakeIsMIDI(take) then
-
-        reaper.DeleteTrackMediaItem(
-            track,
-            item
-        )
-
-        reaper.PreventUIRefresh(-1)
-
-        reaper.Undo_EndBlock(
-            "Insert Hi-Hat MIDI - Exactly One Bar",
-            -1
-        )
-
-        reaper.ShowMessageBox(
-            "Could not create a MIDI take.",
-            TITLE,
-            0
-        )
-
-        return
-    end
-
-    --------------------------------------------------------
-    -- GENERATE THE SELECTED FEEL
-    --------------------------------------------------------
-
-    if feelChoice == 1 then
-
-        ----------------------------------------------------
-        -- NORMAL
-        ----------------------------------------------------
-
-        insertNormalGrid(
-            take,
-            qnStart,
-            qnEnd,
-            subdivisionQN
-        )
-
-    elseif feelChoice == 2 then
-
-        ----------------------------------------------------
-        -- SWING
-        ----------------------------------------------------
-
-        insertSwingGrid(
-            take,
-            qnStart,
-            qnEnd,
-            subdivisionQN
-        )
-
-    elseif feelChoice == 3 then
-
-        ----------------------------------------------------
-        -- TRIPLET
-        ----------------------------------------------------
-
-        insertTripletGrid(
-            take,
-            qnStart,
-            qnEnd,
-            subdivisionQN
-        )
-    end
-
-    --------------------------------------------------------
-    -- SORT MIDI
-    --------------------------------------------------------
-
-    reaper.MIDI_Sort(take)
-
-    --------------------------------------------------------
-    -- SELECT NEW ITEM
-    --------------------------------------------------------
-
-    reaper.SetOnlyTrackSelected(track)
-
-    reaper.SetMediaItemSelected(
-        item,
-        true
-    )
-
-    --------------------------------------------------------
-    -- UPDATE
-    --------------------------------------------------------
-
-    reaper.UpdateItemInProject(item)
-    reaper.UpdateArrange()
-
-    reaper.PreventUIRefresh(-1)
-
-    reaper.Undo_EndBlock(
-        "Insert Hi-Hat MIDI - Exactly One Bar",
-        -1
-    )
-end
 
 ------------------------------------------------------------
 -- GUI LAYOUT
@@ -878,6 +167,230 @@ local cancelX = 170
 local buttonY = 140
 local buttonW = 100
 local buttonH = 30
+
+------------------------------------------------------------
+-- DRAW HELPERS
+------------------------------------------------------------
+
+local function setColor(c)
+
+    gfx.set(
+        c[1],
+        c[2],
+        c[3],
+        c[4]
+    )
+end
+
+------------------------------------------------------------
+
+local function drawRect(
+    x,
+    y,
+    w,
+    h,
+    color,
+    filled
+)
+
+    setColor(color)
+
+    gfx.rect(
+        x,
+        y,
+        w,
+        h,
+        filled ~= false
+    )
+end
+
+------------------------------------------------------------
+
+local function mouseIn(
+    x,
+    y,
+    w,
+    h
+)
+
+    return
+        gfx.mouse_x >= x
+        and
+        gfx.mouse_x <= x + w
+        and
+        gfx.mouse_y >= y
+        and
+        gfx.mouse_y <= y + h
+end
+
+------------------------------------------------------------
+-- BUTTON
+------------------------------------------------------------
+
+local function drawButton(
+    x,
+    y,
+    w,
+    h,
+    text,
+    hovered,
+    primary
+)
+
+    local color
+
+    if primary then
+
+        color =
+            hovered
+            and COLORS.blueHover
+            or COLORS.blue
+
+    else
+
+        color =
+            hovered
+            and COLORS.hover
+            or COLORS.button
+    end
+
+    drawRect(
+        x,
+        y,
+        w,
+        h,
+        color,
+        true
+    )
+
+    setColor(COLORS.border)
+
+    gfx.rect(
+        x,
+        y,
+        w,
+        h,
+        false
+    )
+
+    gfx.setfont(
+        1,
+        "Arial",
+        14
+    )
+
+    setColor(COLORS.white)
+
+    local tw =
+        gfx.measurestr(text)
+
+    gfx.x =
+        x + (w - tw) / 2
+
+    gfx.y =
+        y + (h - 14) / 2
+
+    gfx.drawstr(text)
+end
+
+------------------------------------------------------------
+-- DROPDOWN
+------------------------------------------------------------
+
+local function drawDropdown(
+    x,
+    y,
+    w,
+    h,
+    text,
+    hovered
+)
+
+    local color =
+        hovered
+        and COLORS.hover
+        or COLORS.panel
+
+    drawRect(
+        x,
+        y,
+        w,
+        h,
+        color,
+        true
+    )
+
+    setColor(COLORS.border)
+
+    gfx.rect(
+        x,
+        y,
+        w,
+        h,
+        false
+    )
+
+    gfx.setfont(
+        1,
+        "Arial",
+        14
+    )
+
+    setColor(COLORS.text)
+
+    gfx.x = x + 10
+    gfx.y = y + 7
+
+    gfx.drawstr(text)
+
+    --------------------------------------------------------
+    -- Arrow
+    --------------------------------------------------------
+
+    local arrowX =
+        x + w - 20
+
+    local arrowY =
+        y + h / 2
+
+    setColor(COLORS.label)
+
+    gfx.triangle(
+        arrowX - 5,
+        arrowY - 3,
+        arrowX + 5,
+        arrowY - 3,
+        arrowX,
+        arrowY + 4
+    )
+end
+
+------------------------------------------------------------
+-- DROPDOWN MENU
+------------------------------------------------------------
+
+local function showDropdown(
+    items,
+    current
+)
+
+    local menu =
+        table.concat(
+            items,
+            "|"
+        )
+
+    local selected =
+        gfx.showmenu(menu)
+
+    if selected >= 1
+    and selected <= #items then
+
+        return selected
+    end
+
+    return current
+end
 
 ------------------------------------------------------------
 -- DRAW WINDOW
@@ -1013,15 +526,773 @@ local function drawWindow()
 end
 
 ------------------------------------------------------------
+-- CROSS-PLATFORM CENTER POSITION
+------------------------------------------------------------
+
+local function getCenteredPosition()
+
+    --------------------------------------------------------
+    -- Default fallback.
+    --
+    -- gfx coordinates are screen coordinates when the
+    -- parent is 0.
+    --------------------------------------------------------
+
+    local x = 0
+    local y = 0
+
+    --------------------------------------------------------
+    -- JS_ReaScriptAPI required for monitor/work-area info.
+    --------------------------------------------------------
+
+    if not reaper.JS_Window_GetRect then
+
+        ----------------------------------------------------
+        -- No JS API:
+        -- use primary-screen fallback if available.
+        ----------------------------------------------------
+
+        return x, y
+    end
+
+    local mainHWND =
+        reaper.GetMainHwnd()
+
+    if not mainHWND then
+        return x, y
+    end
+
+    --------------------------------------------------------
+    -- Get REAPER's current screen position.
+    --------------------------------------------------------
+
+    local ok,
+          left,
+          top,
+          right,
+          bottom =
+        reaper.JS_Window_GetRect(
+            mainHWND
+        )
+
+    if not ok then
+        return x, y
+    end
+
+    --------------------------------------------------------
+    -- Determine monitor containing the center of REAPER.
+    --
+    -- JS_Window_FromPoint() is used so multi-monitor
+    -- setups work correctly.
+    --------------------------------------------------------
+
+    local centerScreenX =
+        math.floor(
+            (left + right) / 2
+        )
+
+    local centerScreenY =
+        math.floor(
+            (top + bottom) / 2
+        )
+
+    local monitorHWND = nil
+
+    if reaper.JS_Window_FromPoint then
+
+        monitorHWND =
+            reaper.JS_Window_FromPoint(
+                centerScreenX,
+                centerScreenY
+            )
+    end
+
+    --------------------------------------------------------
+    -- If we cannot identify the monitor, center relative
+    -- to REAPER's screen rectangle.
+    --------------------------------------------------------
+
+    if not monitorHWND then
+
+        x =
+            math.floor(
+                (left + right - WINDOW_W) / 2
+            )
+
+        y =
+            math.floor(
+                (top + bottom - WINDOW_H) / 2
+            )
+
+        return x, y
+    end
+
+    --------------------------------------------------------
+    -- Get monitor/work-area information.
+    --
+    -- JS_Window_GetRect on the monitor window gives the
+    -- physical monitor rectangle on supported systems.
+    --------------------------------------------------------
+
+    local mok,
+          mleft,
+          mtop,
+          mright,
+          mbottom =
+        reaper.JS_Window_GetRect(
+            monitorHWND
+        )
+
+    if not mok then
+
+        x =
+            math.floor(
+                (left + right - WINDOW_W) / 2
+            )
+
+        y =
+            math.floor(
+                (top + bottom - WINDOW_H) / 2
+            )
+
+        return x, y
+    end
+
+    --------------------------------------------------------
+    -- Center on the selected monitor.
+    --------------------------------------------------------
+
+    x =
+        math.floor(
+            mleft +
+            ((mright - mleft) - WINDOW_W) / 2
+        )
+
+    y =
+        math.floor(
+            mtop +
+            ((mbottom - mtop) - WINDOW_H) / 2
+        )
+
+    return x, y
+end
+
+------------------------------------------------------------
+-- OPEN WINDOW
+------------------------------------------------------------
+
+local popupX,
+      popupY =
+    getCenteredPosition()
+
+gfx.init(
+    TITLE,
+    WINDOW_W,
+    WINDOW_H,
+    0,
+    popupX,
+    popupY
+)
+
+------------------------------------------------------------
+-- OPTIONAL NATIVE CORRECTION
+--
+-- gfx.init() normally positions the window correctly.
+--
+-- On systems with unusual DPI/window-manager behavior,
+-- perform one correction after the native window exists.
+------------------------------------------------------------
+
+local function correctPopupPosition()
+
+    if not reaper.JS_Window_Find
+    or not reaper.JS_Window_GetRect
+    or not reaper.JS_Window_SetPosition then
+
+        return
+    end
+
+    local popupHWND =
+        reaper.JS_Window_Find(
+            TITLE,
+            true
+        )
+
+    if not popupHWND then
+        return
+    end
+
+    local mainHWND =
+        reaper.GetMainHwnd()
+
+    if not mainHWND then
+        return
+    end
+
+    --------------------------------------------------------
+    -- Get REAPER.
+    --------------------------------------------------------
+
+    local ok,
+          left,
+          top,
+          right,
+          bottom =
+        reaper.JS_Window_GetRect(
+            mainHWND
+        )
+
+    if not ok then
+        return
+    end
+
+    --------------------------------------------------------
+    -- Center based on the monitor containing REAPER's
+    -- center point.
+    --------------------------------------------------------
+
+    local cx =
+        math.floor(
+            (left + right) / 2
+        )
+
+    local cy =
+        math.floor(
+            (top + bottom) / 2
+        )
+
+    local monitorHWND = nil
+
+    if reaper.JS_Window_FromPoint then
+
+        monitorHWND =
+            reaper.JS_Window_FromPoint(
+                cx,
+                cy
+            )
+    end
+
+    if not monitorHWND then
+        return
+    end
+
+    local mok,
+          ml,
+          mt,
+          mr,
+          mb =
+        reaper.JS_Window_GetRect(
+            monitorHWND
+        )
+
+    if not mok then
+        return
+    end
+
+    --------------------------------------------------------
+    -- Popup's actual outer size.
+    --------------------------------------------------------
+
+    local pok,
+          pl,
+          pt,
+          pr,
+          pb =
+        reaper.JS_Window_GetRect(
+            popupHWND
+        )
+
+    if not pok then
+        return
+    end
+
+    local popupW =
+        pr - pl
+
+    local popupH =
+        pb - pt
+
+    if popupW <= 0
+    or popupH <= 0 then
+        return
+    end
+
+    --------------------------------------------------------
+    -- Center actual native window.
+    --------------------------------------------------------
+
+    local nx =
+        math.floor(
+            ml +
+            ((mr - ml) - popupW) / 2
+        )
+
+    local ny =
+        math.floor(
+            mt +
+            ((mb - mt) - popupH) / 2
+        )
+
+    reaper.JS_Window_SetPosition(
+        popupHWND,
+        nx,
+        ny,
+        popupW,
+        popupH
+    )
+end
+
+------------------------------------------------------------
+-- INSERT NOTE
+------------------------------------------------------------
+
+local function insertNote(
+    take,
+    startQN,
+    endQN,
+    barEndQN
+)
+
+    if startQN >= barEndQN then
+        return
+    end
+
+    endQN =
+        math.min(
+            endQN,
+            barEndQN
+        )
+
+    if endQN <= startQN then
+        return
+    end
+
+    local startPPQ =
+        reaper.MIDI_GetPPQPosFromProjQN(
+            take,
+            startQN
+        )
+
+    local endPPQ =
+        reaper.MIDI_GetPPQPosFromProjQN(
+            take,
+            endQN
+        )
+
+    local spacingPPQ =
+        endPPQ - startPPQ
+
+    local noteLengthPPQ =
+        math.max(
+            1,
+            spacingPPQ * 0.25
+        )
+
+    local barEndPPQ =
+        reaper.MIDI_GetPPQPosFromProjQN(
+            take,
+            barEndQN
+        )
+
+    local noteEndPPQ =
+        math.min(
+            startPPQ + noteLengthPPQ,
+            barEndPPQ
+        )
+
+    if noteEndPPQ > startPPQ then
+
+        reaper.MIDI_InsertNote(
+            take,
+            false,
+            false,
+            startPPQ,
+            noteEndPPQ,
+            MIDI_CHANNEL,
+            MIDI_NOTE,
+            MIDI_VELOCITY,
+            true
+        )
+    end
+end
+
+------------------------------------------------------------
+-- NORMAL GRID
+------------------------------------------------------------
+
+local function insertNormalGrid(
+    take,
+    qnStart,
+    qnEnd,
+    subdivisionQN
+)
+
+    local currentQN =
+        qnStart
+
+    while currentQN <
+          qnEnd - 0.0000001 do
+
+        local nextQN =
+            math.min(
+                currentQN + subdivisionQN,
+                qnEnd
+            )
+
+        insertNote(
+            take,
+            currentQN,
+            nextQN,
+            qnEnd
+        )
+
+        currentQN =
+            nextQN
+    end
+end
+
+------------------------------------------------------------
+-- SWING GRID
+------------------------------------------------------------
+
+local function insertSwingGrid(
+    take,
+    qnStart,
+    qnEnd,
+    subdivisionQN
+)
+
+    local pairQN =
+        subdivisionQN * 2
+
+    local currentQN =
+        qnStart
+
+    while currentQN <
+          qnEnd - 0.0000001 do
+
+        local pairEndQN =
+            math.min(
+                currentQN + pairQN,
+                qnEnd
+            )
+
+        local pairLength =
+            pairEndQN - currentQN
+
+        if pairLength <= 0 then
+            break
+        end
+
+        local secondQN =
+            currentQN +
+            pairLength * (2 / 3)
+
+        insertNote(
+            take,
+            currentQN,
+            secondQN,
+            qnEnd
+        )
+
+        if secondQN <
+           pairEndQN - 0.0000001 then
+
+            insertNote(
+                take,
+                secondQN,
+                pairEndQN,
+                qnEnd
+            )
+        end
+
+        currentQN =
+            pairEndQN
+    end
+end
+
+------------------------------------------------------------
+-- TRIPLET GRID
+------------------------------------------------------------
+
+local function insertTripletGrid(
+    take,
+    qnStart,
+    qnEnd,
+    subdivisionQN
+)
+
+    local tripletQN =
+        subdivisionQN / 3
+
+    local currentQN =
+        qnStart
+
+    while currentQN <
+          qnEnd - 0.0000001 do
+
+        local nextQN =
+            math.min(
+                currentQN + tripletQN,
+                qnEnd
+            )
+
+        insertNote(
+            take,
+            currentQN,
+            nextQN,
+            qnEnd
+        )
+
+        currentQN =
+            nextQN
+    end
+end
+
+------------------------------------------------------------
+-- INSERT HI-HAT
+------------------------------------------------------------
+
+local function insertHiHat()
+
+    local measureStartTime,
+          qnStart,
+          qnEnd,
+          numerator,
+          denominator =
+        reaper.TimeMap_GetMeasureInfo(
+            PROJ,
+            0
+        )
+
+    if not measureStartTime
+    or not qnStart
+    or not qnEnd then
+
+        reaper.ShowMessageBox(
+            "Could not determine the first project measure.",
+            TITLE,
+            0
+        )
+
+        return
+    end
+
+    if qnEnd <= qnStart then
+
+        reaper.ShowMessageBox(
+            "The first project measure has an invalid QN range.",
+            TITLE,
+            0
+        )
+
+        return
+    end
+
+    --------------------------------------------------------
+    -- Exact measure end.
+    --------------------------------------------------------
+
+    local measureEndTime =
+        reaper.TimeMap2_QNToTime(
+            PROJ,
+            qnEnd
+        )
+
+    if not measureEndTime
+    or measureEndTime <= measureStartTime then
+
+        reaper.ShowMessageBox(
+            "The first project measure has an invalid time range.",
+            TITLE,
+            0
+        )
+
+        return
+    end
+
+    --------------------------------------------------------
+    -- Selected subdivision.
+    --------------------------------------------------------
+
+    local subdivisionQN =
+        1 /
+        subdivisionValues[subdivisionChoice]
+
+    --------------------------------------------------------
+    -- Undo.
+    --------------------------------------------------------
+
+    reaper.Undo_BeginBlock()
+    reaper.PreventUIRefresh(1)
+
+    --------------------------------------------------------
+    -- Create MIDI item.
+    --------------------------------------------------------
+
+    local item =
+        reaper.CreateNewMIDIItemInProj(
+            track,
+            measureStartTime,
+            measureEndTime,
+            false
+        )
+
+    if not item then
+
+        reaper.PreventUIRefresh(-1)
+
+        reaper.Undo_EndBlock(
+            "Insert Hi-Hat MIDI",
+            -1
+        )
+
+        reaper.ShowMessageBox(
+            "Could not create the MIDI item.",
+            TITLE,
+            0
+        )
+
+        return
+    end
+
+    --------------------------------------------------------
+    -- Exact boundaries.
+    --------------------------------------------------------
+
+    reaper.SetMediaItemInfo_Value(
+        item,
+        "D_POSITION",
+        measureStartTime
+    )
+
+    reaper.SetMediaItemInfo_Value(
+        item,
+        "D_LENGTH",
+        measureEndTime - measureStartTime
+    )
+
+    reaper.SetMediaItemInfo_Value(
+        item,
+        "B_LOOPSRC",
+        0
+    )
+
+    --------------------------------------------------------
+    -- MIDI take.
+    --------------------------------------------------------
+
+    local take =
+        reaper.GetActiveTake(
+            item
+        )
+
+    if not take
+    or not reaper.TakeIsMIDI(take) then
+
+        reaper.DeleteTrackMediaItem(
+            track,
+            item
+        )
+
+        reaper.PreventUIRefresh(-1)
+
+        reaper.Undo_EndBlock(
+            "Insert Hi-Hat MIDI",
+            -1
+        )
+
+        reaper.ShowMessageBox(
+            "Could not create a MIDI take.",
+            TITLE,
+            0
+        )
+
+        return
+    end
+
+    --------------------------------------------------------
+    -- Generate.
+    --------------------------------------------------------
+
+    if feelChoice == 1 then
+
+        insertNormalGrid(
+            take,
+            qnStart,
+            qnEnd,
+            subdivisionQN
+        )
+
+    elseif feelChoice == 2 then
+
+        insertSwingGrid(
+            take,
+            qnStart,
+            qnEnd,
+            subdivisionQN
+        )
+
+    elseif feelChoice == 3 then
+
+        insertTripletGrid(
+            take,
+            qnStart,
+            qnEnd,
+            subdivisionQN
+        )
+    end
+
+    --------------------------------------------------------
+    -- Sort.
+    --------------------------------------------------------
+
+    reaper.MIDI_Sort(
+        take
+    )
+
+    --------------------------------------------------------
+    -- Select.
+    --------------------------------------------------------
+
+    reaper.SetOnlyTrackSelected(
+        track
+    )
+
+    reaper.SetMediaItemSelected(
+        item,
+        true
+    )
+
+    reaper.UpdateItemInProject(
+        item
+    )
+
+    reaper.UpdateArrange()
+
+    reaper.PreventUIRefresh(-1)
+
+    reaper.Undo_EndBlock(
+        "Insert Hi-Hat MIDI - Exactly One Bar",
+        -1
+    )
+end
+
+------------------------------------------------------------
 -- GUI LOOP
 ------------------------------------------------------------
 
-local function main()
-
-    local char = gfx.getchar()
+local function guiLoop()
 
     --------------------------------------------------------
-    -- Window closed
+    -- Keyboard.
+    --------------------------------------------------------
+
+    local char =
+        gfx.getchar()
+
+    --------------------------------------------------------
+    -- Window closed.
     --------------------------------------------------------
 
     if char == -1 then
@@ -1035,7 +1306,7 @@ local function main()
     end
 
     --------------------------------------------------------
-    -- ESC = CANCEL
+    -- ESC.
     --------------------------------------------------------
 
     if char == 27 then
@@ -1049,7 +1320,7 @@ local function main()
     end
 
     --------------------------------------------------------
-    -- ENTER = INSERT
+    -- ENTER.
     --------------------------------------------------------
 
     if char == 13 then
@@ -1062,27 +1333,27 @@ local function main()
     end
 
     --------------------------------------------------------
-    -- DRAW
+    -- Draw.
     --------------------------------------------------------
 
     drawWindow()
 
     --------------------------------------------------------
-    -- MOUSE
+    -- Mouse.
     --------------------------------------------------------
 
     local mouseCap =
         gfx.mouse_cap
 
     local clicked =
-        ((mouseCap & 1) ~= 0)
+        (mouseCap & 1) ~= 0
         and
-        ((lastMouseCap & 1) == 0)
+        (lastMouseCap & 1) == 0
 
     if clicked then
 
         ----------------------------------------------------
-        -- Subdivision dropdown
+        -- Subdivision.
         ----------------------------------------------------
 
         if mouseIn(
@@ -1099,7 +1370,7 @@ local function main()
                 )
 
         ----------------------------------------------------
-        -- Feel dropdown
+        -- Feel.
         ----------------------------------------------------
 
         elseif mouseIn(
@@ -1116,7 +1387,7 @@ local function main()
                 )
 
         ----------------------------------------------------
-        -- Insert
+        -- Insert.
         ----------------------------------------------------
 
         elseif mouseIn(
@@ -1130,12 +1401,10 @@ local function main()
 
             gfx.quit()
 
-            lastMouseCap = mouseCap
-
             return
 
         ----------------------------------------------------
-        -- Cancel
+        -- Cancel.
         ----------------------------------------------------
 
         elseif mouseIn(
@@ -1150,29 +1419,34 @@ local function main()
 
             gfx.quit()
 
-            lastMouseCap = mouseCap
-
             return
         end
     end
 
-    lastMouseCap = mouseCap
+    lastMouseCap =
+        mouseCap
 
     --------------------------------------------------------
-    -- Continue
+    -- Continue.
     --------------------------------------------------------
 
-    reaper.defer(main)
+    reaper.defer(
+        guiLoop
+    )
 end
 
 ------------------------------------------------------------
--- WAIT FOR DIALOG
+-- FINISH DIALOG
 ------------------------------------------------------------
 
-local function waitForDialog()
+local function finishDialog()
 
     if not dialogDone then
-        reaper.defer(waitForDialog)
+
+        reaper.defer(
+            finishDialog
+        )
+
         return
     end
 
@@ -1184,146 +1458,44 @@ local function waitForDialog()
 end
 
 ------------------------------------------------------------
--- OPEN WINDOW AND CENTER IT OVER REAPER
+-- CREATE CENTERED WINDOW
 ------------------------------------------------------------
+
+local popupX,
+      popupY =
+    getCenteredPosition()
 
 gfx.init(
     TITLE,
     WINDOW_W,
     WINDOW_H,
     0,
-    0,
-    0
+    popupX,
+    popupY
 )
 
 ------------------------------------------------------------
--- Center the actual gfx window AFTER it exists.
+-- Give the OS one defer cycle to create the native
+-- window, then make one corrective positioning pass.
 ------------------------------------------------------------
 
-local function centerPopup()
+local function delayedCenter()
 
-    -- JS_ReaScriptAPI required for reliable positioning.
-    if not reaper.JS_Window_Find
-    or not reaper.JS_Window_GetRect
-    or not reaper.JS_Window_SetPosition then
-
-        return
-    end
-
-    --------------------------------------------------------
-    -- Find the gfx popup window.
-    --------------------------------------------------------
-
-    local popupHWND =
-        reaper.JS_Window_Find(
-            TITLE,
-            true
-        )
-
-    if not popupHWND then
-        return
-    end
-
-    --------------------------------------------------------
-    -- Get REAPER main-window rectangle.
-    --------------------------------------------------------
-
-    local mainHWND =
-        reaper.GetMainHwnd()
-
-    if not mainHWND then
-        return
-    end
-
-    local mainOK,
-          mainLeft,
-          mainTop,
-          mainRight,
-          mainBottom =
-        reaper.JS_Window_GetRect(
-            mainHWND
-        )
-
-    if not mainOK then
-        return
-    end
-
-    --------------------------------------------------------
-    -- Get actual popup rectangle.
-    --------------------------------------------------------
-
-    local popupOK,
-          popupLeft,
-          popupTop,
-          popupRight,
-          popupBottom =
-        reaper.JS_Window_GetRect(
-            popupHWND
-        )
-
-    if not popupOK then
-        return
-    end
-
-    --------------------------------------------------------
-    -- Actual popup dimensions.
-    --------------------------------------------------------
-
-    local popupWidth =
-        popupRight - popupLeft
-
-    local popupHeight =
-        popupBottom - popupTop
-
-    --------------------------------------------------------
-    -- REAPER window dimensions.
-    --------------------------------------------------------
-
-    local mainWidth =
-        mainRight - mainLeft
-
-    local mainHeight =
-        mainBottom - mainTop
-
-    --------------------------------------------------------
-    -- Calculate exact center.
-    --------------------------------------------------------
-
-    local newX =
-        math.floor(
-            mainLeft +
-            (mainWidth - popupWidth) / 2
-        )
-
-    local newY =
-        math.floor(
-            mainTop +
-            (mainHeight - popupHeight) / 2
-        )
-
-    --------------------------------------------------------
-    -- Move the actual popup window.
-    --------------------------------------------------------
-
-    reaper.JS_Window_SetPosition(
-        popupHWND,
-        newX,
-        newY,
-        popupWidth,
-        popupHeight
-    )
+    correctPopupPosition()
 end
 
-------------------------------------------------------------
--- Give Windows/macOS/Linux a moment to create the
--- gfx window, then center it.
-------------------------------------------------------------
-
-centerPopup()
+reaper.defer(
+    delayedCenter
+)
 
 ------------------------------------------------------------
--- Start GUI
+-- START
 ------------------------------------------------------------
 
-main()
-reaper.defer(waitForDialog)
+reaper.defer(
+    guiLoop
+)
+
+reaper.defer(
+    finishDialog
+)
